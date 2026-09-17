@@ -5,8 +5,6 @@ import mediapipe as mp
 import numpy as np
 from math import dist as pDist
 
-#task_path = "C:\\Users\\ltf\\Documents\\dev\\GIT\\workshop-python\\docs\\modulo_mediapipe\\hand_landmarker.task"
-#task_path = "docs/modulo_mediapipe/hand_landmarker.task"
 @dataclass
 class handDist:
     x:float
@@ -14,6 +12,7 @@ class handDist:
     closed:bool
     def __str__(self):
         return f"handDist(x:{self.x*100:.1f}%,y:{self.y*100:.1f}%,closed:{self.closed})"
+    
 class handDetection:
     def __init__(self,#varios valores padrão
                  dead_zone_size= (160,90),#limites da zona morta, pode ser int caso o ela seja quadrada, tuple(int,int) para retangulos
