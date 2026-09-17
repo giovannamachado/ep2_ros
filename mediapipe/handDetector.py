@@ -6,9 +6,14 @@ import numpy as np
 #task_path = "C:\\Users\\ltf\\Documents\\dev\\GIT\\workshop-python\\docs\\modulo_mediapipe\\hand_landmarker.task"
 #task_path = "docs/modulo_mediapipe/hand_landmarker.task"
 
-@dataclass
 class handDetection:
-    task_path :str = "files/hand_landmarker.task"
+    def __init__(self,frame_width = 1900,frame_height = 1900,task_path = "files/hand_landmarker.task"):
+        self.task_path = task_path
+        self.cap = cv.VideoCapture(0, cv.CAP_DSHOW)
+        # cap.set(cv.CAP_PROP_FPS, 3)
+        self.cap.set(cv.CAP_PROP_FRAME_HEIGHT, frame_height)
+        self.cap.set(cv.CAP_PROP_FRAME_WIDTH, frame_width)
+        self.cap.read()
 
     def drawhandBox(self,frame,middle,box,cat,id): 
         (x,y) =(int(middle[0]),int(middle[1]))
@@ -41,11 +46,8 @@ class handDetection:
 
 
     def main(self):
-        cap = cv.VideoCapture(0, cv.CAP_DSHOW)
-        # cap.set(cv.CAP_PROP_FPS, 3)
-        cap.set(cv.CAP_PROP_FRAME_HEIGHT, 1900)
-        cap.set(cv.CAP_PROP_FRAME_WIDTH, 1900)
-        ret, frame = cap.read()
+
+        ret, frame = self.cap.read()
         y,x = frame.shape[:2]     
         center = (int(x/2),int(y/2))
         #Troca mão no video espelhado
@@ -57,7 +59,7 @@ class handDetection:
         ordernames= {1:'st',2:'nd',3:'rd',10:"th"}
         while True:
             # Read frame
-            ret, frame = cap.read()
+            ret, frame = self.cap.read()
             frame = cv.flip(frame,1)
             if not ret:
                 continue
@@ -93,10 +95,9 @@ class handDetection:
                     #drawHandLines(frame,hand_lines)
                 
             
-            if cv.waitKey(1) & 0xFF == ord('q'):
-                break
+            if cv.waitKey(1) & 0xFF == ord('q'): break
             c+=1
-        cap.release()
+        self.cap.release()
         cv.destroyAllWindows()
 
 
