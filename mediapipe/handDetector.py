@@ -19,12 +19,12 @@ class handDist:#classe que guarda as informações
 class handDetection:
     def __init__(self,#varios valores padrão
                  dead_zone_size= (160,90),#limites da zona morta, pode ser int caso o ela seja quadrada, tuple(int,int) para retangulos
-                 max_zone_size= (80,45),#limites da zona morta, pode ser int caso o ela seja quadrada, tuple(int,int) para retangulos
+                 max_zone_size= (160,90),#limites da zona maxima, usa a distancia para borda ao invez do seu tamanho
                  frame_width = 1900,frame_height = 1900,#resolução desejada (no coumputador testado ele transforma em 720x1280)
                  task_path = "GIT/ep2_ros/mediapipe/files/hand_landmarker.task",#caminho para o arquivo tsak do mediapipe
                  confidence={"detection":0.5,"presence":0.5,"traking":0.5},#variaveis de confiança do modelo do mediapipe
                  limit= -200,#Quão fora do quadro o centro da mão deve estar para ser desconsiderado
-                 cross_mode = False):
+                 cross_mode = False):#O modo de exibição das zonas da imagem
         self.limit = limit if limit<0 else -limit
         self.cross_mode = cross_mode
         self.mzone = (max_zone_size[0]/2,max_zone_size[1]/2) if isinstance(max_zone_size,tuple) else (max_zone_size/2,max_zone_size/2)
@@ -36,9 +36,9 @@ class handDetection:
         self.cap.set(cv.CAP_PROP_FRAME_WIDTH, frame_width)
         _, self.frame = self.cap.read()
         y,x = self.frame.shape[:2]
-        self.rez = (x,y)  
-        self.center = (int(x/2),int(y/2))
-        self.hand_center = (-x,-y)
+        self.rez = (x,y) # resolução da captura
+        self.center = (int(x/2),int(y/2)) # centro da captura
+        self.hand_center = (-x,-y) #centro da mão
         options = mp.tasks.vision.HandLandmarkerOptions(
             base_options=mp.tasks.BaseOptions(model_asset_path=task_path),
             min_hand_presence_confidence = confidence["presence"],
@@ -48,7 +48,7 @@ class handDetection:
             num_hands=1, )
 
         self.detector = mp.tasks.vision.HandLandmarker.create_from_options(options)
-        
+
     def _hand_state(self):
         pass
 
@@ -65,18 +65,25 @@ class handDetection:
                 count+=1
         return count>=4,fingers#conta pelo menos 4 dedos para considerar fechada
     
-    def _dist_center(self,p,m,z):#calcula a distancia da zona morta para o centro da mão
-        dist = m/2-z
-        if p<self.limit or p>m-self.limit: return 0
-        if p>(z+m/2): return min((p-(z+m/2))/dist,1.0)
-        elif p<dist: return max((p-dist)/dist,-1.0)
+    def _dist_center(self,p,i):#calcula a distancia da zona morta para o centro da mão
+        d_zone = self.dzone[i]
+        side = self.rez[i]
+        m_zone =self.mzone[i]
+        dist = side/2-d_zone-m_zone
+
+        if p<self.limit or p>side-self.limit: return 0
+
+        elif p>(d_zone+side/2): 
+            return min((p-(d_zone+side/2))/dist,1.0)
+        elif p<dist: 
+            return max((p-(dist+m_zone))/dist,-1.0)
         else: return 0
+
     @property
     def handDist(self):
         px,py = (float(self.hand_center[0]),float(self.hand_center[1]))
-        x,y = self.rez
-        x = self._dist_center(px,x,self.dzone[0])
-        y = -self._dist_center(py,y,self.dzone[1])
+        x = self._dist_center(px,0)
+        y = -self._dist_center(py,1)
         closed,fing = self._hand_closed()
         return handDist(x,y,closed=closed,closed_fingers=fing)#(x,y,closed)
     
