@@ -3,43 +3,57 @@ from dataclasses import dataclass
 import cv2 as cv
 import mediapipe as mp
 import numpy as np
-from math import dist as pDist
+from math import dist as pointDist
 
 @dataclass
 class handDist:#classe que guarda as informações
     x:float
     y:float
-    closed_fingers: dict
-    closed:bool
+    finger_dists: dict#lista de dedos
+    comp_fingers: dict
+    @property
+    def closed(self):
+        count = 0
+        for points in self.finger_dists.values():
+
+            if all(points[0]<points[k] for k,v in self.comp_fingers.items()):#se distancia da ponta do dedo for menor, o dedo é considerado como fechado
+                count+=1
+        return count>=4
+    def closedFinger(self,n):
+        points = self.finger_dists[n]
+        return all(points[0]<points[k] for k,v in self.comp_fingers.items())
+        
     def __str__(self):
         #return f"handDist(x:{self.x*100:.1f}%,y:{self.y*100:.1f}%,closed:{self.closed})"
-        cs = [f"Finger {k}: [{",".join(f"{v if not isinstance(v,float) else v:.1f}" for v in vl)}]" for k,vl in self.closed_fingers.items()]
+        cs = [f"Finger {k:<2}: [{", ".join(f"{f"{n:.1f}":>5}" for n in v)},{self.closedFinger(k)}]" for k,v in self.finger_dists.items()]
         return f"handDist(x:{self.x*100:.1f}%,y:{self.y*100:.1f}%,closed:{self.closed}){"".join(f"\n\t\t{v}" for v in cs)}"
     
 class handDetection:
     def __init__(self,#varios valores padrão
                  dead_zone_size= (160,90),#limites da zona morta, pode ser int caso o ela seja quadrada, tuple(int,int) para retangulos
-                 max_zone_size= (160,90),#limites da zona maxima, usa a distancia para borda ao invez do seu tamanho
+                 max_zone_size= (160,90),#limites da zona maxima, similar ao anterior, usa a distancia para borda ao invez do seu tamanho
                  frame_width = 1900,frame_height = 1900,#resolução desejada (no coumputador testado ele transforma em 720x1280)
                  task_path = "GIT/ep2_ros/mediapipe/files/hand_landmarker.task",#caminho para o arquivo tsak do mediapipe
                  confidence={"detection":0.5,"presence":0.5,"traking":0.5},#variaveis de confiança do modelo do mediapipe
-                 limit= -200,#Quão fora do quadro o centro da mão deve estar para ser desconsiderado
+                 limit= -100,#Quão fora do quadro o centro da mão deve estar para ser desconsiderado
                  cross_mode = False):#O modo de exibição das zonas da imagem
-        self.limit = limit if limit<0 else -limit
+        self.limit = limit if limit<0 else -limit#limite deve ser negativo
         self.cross_mode = cross_mode
-        self.mzone = (max_zone_size[0]/2,max_zone_size[1]/2) if isinstance(max_zone_size,tuple) else (max_zone_size/2,max_zone_size/2)
+        self.mzone = (max_zone_size[0]/2,max_zone_size[1]/2) if isinstance(max_zone_size,tuple) else (max_zone_size/2,max_zone_size/2)#sempre usa metade do numero entregue
         self.dzone = (dead_zone_size[0]/2,dead_zone_size[1]/2) if isinstance(dead_zone_size,tuple) else (dead_zone_size/2,dead_zone_size/2)
-        self.cap = cv.VideoCapture(0, cv.CAP_DSHOW)
+        self.cap = cv.VideoCapture(0, cv.CAP_DSHOW)#inicio da captura
         # self.cap = cv.VideoCapture(0,cv.CAP_V4L2)
         # self.cap.set(cv.CAP_PROP_FOURCC,cv.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-        self.cap.set(cv.CAP_PROP_FRAME_HEIGHT, frame_height)
+        self.cap.set(cv.CAP_PROP_FRAME_HEIGHT, frame_height)#tenta configurar a resolução da captura, (geralmente resulta em um valor menor)
         self.cap.set(cv.CAP_PROP_FRAME_WIDTH, frame_width)
-        _, self.frame = self.cap.read()
+        _, self.frame = self.cap.read()#verifica a resolução da captura
         y,x = self.frame.shape[:2]
         self.rez = (x,y) # resolução da captura
         self.center = (int(x/2),int(y/2)) # centro da captura
         self.hand_center = (-x,-y) #centro da mão
-        options = mp.tasks.vision.HandLandmarkerOptions(
+        self.duos = [(0,1),(0,5),(0,17),(5,9),(9,13),(13,17)]#duplas de pontos para desenhar linhas em um metodo
+        self.duos +=[(v+i-1,v+i) for v in set([vl[1] for vl in self.duos]) for i in range(1,4) if v!=0]+[(2,5)]
+        options = mp.tasks.vision.HandLandmarkerOptions(#opçoes do detector
             base_options=mp.tasks.BaseOptions(model_asset_path=task_path),
             min_hand_presence_confidence = confidence["presence"],
             min_hand_detection_confidence= confidence["detection"],  
@@ -47,45 +61,43 @@ class handDetection:
             running_mode=mp.tasks.vision.RunningMode.IMAGE, 
             num_hands=1, )
 
-        self.detector = mp.tasks.vision.HandLandmarker.create_from_options(options)
+        self.detector = mp.tasks.vision.HandLandmarker.create_from_options(options)#detector
 
-    def _hand_state(self):
-        pass
+    # def _hand_gesture(self):#Reconhece possiveis gestos
+    #     pass
 
-    def _hand_closed(self):#detecta se a mão aparenta estar fechada
-        count = 0
-        point0 = self.hand_points[0]
-        fingers = {}
+    def _hand_dists(self):#detecta se a mão aparenta estar fechada
+        point = self.hand_points[0]# ponto base
+        fingers = {}# lista de dedos
         for i in [4*j for j in range(1,6)]:
-            point1 = pDist(self.hand_points[i],point0)
-            point2 = pDist(self.hand_points[i-1],point0)
-            #print(f"\t\tp{i:>2} {point1:.2f}/ p{i-1:<2} {point2:.2f} : {point1<point2}")
-            fingers[i] = [point1<point2,point1,point2]
-            if point1<point2:#se a ponta do dedo não for o ponto mais distante do ponto 0 da mão ele é considerado fechado
-                count+=1
-        return count>=4,fingers#conta pelo menos 4 dedos para considerar fechada
+            dists = []
+            dists.append(pointDist(self.hand_points[i],point))#distancia da ponta do dedo com o ponto base
+            dists.append(pointDist(self.hand_points[i-1],point))#distancia do segundo ponto do dedo com o ponto base
+            dists.append(pointDist(self.hand_points[i-2],point))
+            dists.append(pointDist(self.hand_points[i-3],point))
+            fingers[i] = dists
+            
+        return fingers
     
-    def _dist_center(self,p,i):#calcula a distancia da zona morta para o centro da mão
-        d_zone = self.dzone[i]
+    def _dist_center(self,p,i):#calcula onde o ponto central da mão esta, em relação ao limite das duas zonas
         side = self.rez[i]
-        m_zone =self.mzone[i]
-        dist = side/2-d_zone-m_zone
-
-        if p<self.limit or p>side-self.limit: return 0
-
-        elif p>(d_zone+side/2): 
-            return min((p-(d_zone+side/2))/dist,1.0)
-        elif p<dist: 
-            return max((p-(dist+m_zone))/dist,-1.0)
-        else: return 0
+        
+        if p>=self.limit and p<=side-self.limit:#verifica se esta dentro dos limites aceitos
+            d_zone = self.dzone[i]
+            dist = side/2-d_zone#distancia para zona morta
+            if p>(d_zone+side/2): #caso esteja depois da zona morta
+                return min((p-(d_zone+side/2))/(dist-self.mzone[i]),1.0)#distancia entre mão e zona morta/ distancia entra as duas zonas
+            elif p<(dist): #caso antes da zona
+                return max((p-(dist))/(dist-self.mzone[i]),-1.0)#distancia entre mão e zona morta/ distancia entra as duas zonas
+        return 0
 
     @property
     def handDist(self):
         px,py = (float(self.hand_center[0]),float(self.hand_center[1]))
         x = self._dist_center(px,0)
         y = -self._dist_center(py,1)
-        closed,fing = self._hand_closed()
-        return handDist(x,y,closed=closed,closed_fingers=fing)#(x,y,closed)
+        fing = self._hand_dists()
+        return handDist(x,y,finger_dists=fing,comp_fingers={2:1.0})#(x,y,closed)
     
     def __drawnZones(self):# desenha a zona morta e zona maxima
         zx = int(self.dzone[0])
@@ -93,23 +105,21 @@ class handDetection:
         (cx,cy) = self.center#centro da tela
         rx,ry = self.rez
         mx,my = self.mzone
-        
+        if self.cross_mode:
+            duos = [((cx+zx,0),(cx-zx,ry),(0,0,0)),((0,zy+cy),(rx,cy-zy),(0,0,0)),#zona morta
+                    ((int(mx),int(0)),(int(rx-mx),int(ry)),(255,255,255)),((int(0),int(my)),(int(rx),int(ry-my)),(255,255,255))]#zona maxima
+        else: 
+            duos = [((cx+zx,zy+cy),(cx-zx,cy-zy),(0,0,0))#zona morta
+                    ((int(mx),int(my)),(int(rx-mx),int(ry-my)),(255,255,255))]#zona maxima
         cv.circle(self.frame,(cx,cy),3,color=(255,255,255),thickness=-1)#ponto central da tela
         cv.circle(self.frame,(cx,cy),2,color=(0,0,0),thickness=-1)
-        if self.cross_mode:# Dezenha a soma das zonas para x e y
-            r1  =(cx+zx,0)#pontos do retangulo
-            r2  =(cx-zx,ry)
-            r3  =(0,zy+cy)
-            r4  =(rx,cy-zy)
-            cv.rectangle(self.frame,pt1=r1,pt2=r2,color=(0,0,0),thickness=3)
-            cv.rectangle(self.frame,pt1=r3,pt2=r4,color=(0,0,0),thickness=3)
-            cv.rectangle(self.frame,pt1=(int(mx),int(0)),pt2=(int(rx-mx),int(ry)),color=(255,255,255),thickness=3)
-            cv.rectangle(self.frame,pt1=(int(0),int(my)),pt2=(int(rx),int(ry-my)),color=(255,255,255),thickness=3)
-        else:# Dezenha a intercessão das zonas para x e y
-            r1  =(cx+zx,zy+cy)#pontos do retangulo
-            r2  =(cx-zx,cy-zy)
-            cv.rectangle(self.frame,pt1=r1,pt2=r2,color=(0,0,0),thickness=3)
-            cv.rectangle(self.frame,pt1=(int(mx),int(my)),pt2=(int(rx-mx),int(ry-my)),color=(255,255,255),thickness=3)
+        for p1,p2,color in duos:
+            cv.rectangle(self.frame,pt1=p1,pt2=p2,color=color,thickness=3)
+
+    def __doubleLine(self,p1,p2,color):#desenha duas linhas uma em cima da outra
+        b,g,r = color
+        cv.line(self.frame,p1,p2,color=color,thickness=2)
+        cv.line(self.frame,p1,p2,(255-b,255-g,255-r),thickness=1)
 
     def drawHandAndBox(self,box,cat,id): 
         (x,y) =(int(self.hand_center[0]),int(self.hand_center[1]))#poisição do centro da mão em inteiros
@@ -117,31 +127,20 @@ class handDetection:
         dist = self.handDist
         cv.drawContours(self.frame,[box],contourIdx=0,color=(255,0,0),thickness=2)
         cv.circle(self.frame,(x,y),2,color=(0,0,255),thickness=-1)#ponto central do retangulo
-        cv.putText(self.frame,f"{cat}",(x,y-10),cv.FONT_HERSHEY_PLAIN,1,(0,255,255))#Categoria(Lado) da mão
-        cv.putText(self.frame,f"{dist}",(x,y+10),cv.FONT_HERSHEY_PLAIN,1,(0,255,255))#Status da mão
+        cv.putText(self.frame,f"{cat}: {dist}".replace("\t","    "),(x,y),cv.FONT_HERSHEY_PLAIN,1,(0,255,255))#Categoria(Lado) e status da mão
         
         #linha para do centro da imagem para o centro da mão
         (cx,cy) = self.center
-        cv.line(self.frame,(cx,cy),(x,cy),(255,0,0),thickness=2)
-        cv.line(self.frame,(x,cy),(x,y),(255,0,0),thickness=2)
-        cv.line(self.frame,(cx,cy),(x,cy),(0,0,255),thickness=1)
-        cv.line(self.frame,(x,cy),(x,y),(0,0,255),thickness=1)
-
+        self.__doubleLine((cx,cy),(x,cy),(255,0,0))
+        self.__doubleLine((x,cy),(x,y),(255,0,0))
         print(f"{id}\n\tSide:{cat}\n\tDist:{dist}")# print para as informações das mãos
     
         #desenha linhas entre os dedos da mão
-        duos = [(0,1),(0,5),(0,17),(5,9),(9,13),(13,17)]
-        duos +=[(v+i-1,v+i) for v in set([vl[1] for vl in duos]) for i in range(1,4) if v!=0]+[(2,5)]
-        for a,b in duos:#usa as duplas de indexes dos pontos para desenhar as linhas
+        for a,b in self.duos:#usa as duplas de indexes dos pontos para desenhar as linhas
             self.frame = cv.line(self.frame,self.hand_points[a],self.hand_points[b],color=(0,255,0))
         for p in self.hand_points:#desenha cada ponto da mão e numera eles
             self.frame = cv.putText(self.frame,f"{self.hand_points.index(p)}",p,cv.FONT_HERSHEY_PLAIN,1,(255,255,0))
             self.frame = cv.circle(self.frame,p,2,color=(255,0,255),thickness=-1)
-    
-    def __getMiddleAndBox(self):# pega os pontos da caixa e centro da mão
-        r = cv.minAreaRect(np.array([self.hand_points]))
-        self.hand_center = r[0]
-        return cv.boxPoints(r)  #pixel Position  
         
     def main(self):
 
@@ -163,7 +162,9 @@ class handDetection:
                 hand = r.hand_landmarks[0]
                 h = r.handedness[0][0]
                 self.hand_points = [(int(l.x*x),int(l.y*y)) for l in hand]
-                box = self.__getMiddleAndBox()
+                r = cv.minAreaRect(np.array([self.hand_points]))# pega os pontos da caixa e centro da mão
+                self.hand_center = r[0]
+                box =  cv.boxPoints(r) #pontos da caixa
                 self.drawHandAndBox(box.astype(np.int64),handSwitch[h.index],"Main Hand Stats:")
             cv.imshow('Webcam', self.frame)#mostra a imagem capturada com as alterações feitas
             if cv.waitKey(1) & 0xFF == ord('q'): break
