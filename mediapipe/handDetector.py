@@ -92,80 +92,85 @@ class handDetection:
         return 0
 
     @property
-    def handDist(self):
+    def hand_dist(self):# cria um objeto handDist
         px,py = (float(self.hand_center[0]),float(self.hand_center[1]))
         x = self._dist_center(px,0)
         y = -self._dist_center(py,1)
         fing = self._hand_dists()
         return handDist(x,y,finger_dists=fing,comp_fingers={2:1.0})#(x,y,closed)
+
+    # def updatedefhandDist(self):
+    #     px,py = (float(self.hand_center[0]),float(self.hand_center[1]))
+    #     x = self._dist_center(px,0)
+    #     y = -self._dist_center(py,1)
+    #     fing = self._hand_dists()
+    #     self.__hand_dist = handDist(x,y,finger_dists=fing,comp_fingers={2:1.0})
     
+
+    def __doubleLine(self,p1,p2,color,color2):#desenha duas linhas uma em cima da outra
+        cv.line(self.frame,p1,p2,color=color,thickness=2)
+        cv.line(self.frame,p1,p2,color=color2,thickness=1)
+
+    def __doublePoint(self,p1,color,color2,size = 2):#desenha dois pontos um em cima da outro
+        cv.circle(self.frame,p1,size+1,color=color,thickness=2)
+        cv.circle(self.frame,p1,size,color=color2,thickness=1)
+
     def __drawnZones(self):# desenha a zona morta e zona maxima
         zx = int(self.dzone[0])
         zy = int(self.dzone[1])
+        mx = int(self.mzone[0])
+        my = int(self.mzone[1])
         (cx,cy) = self.center#centro da tela
         rx,ry = self.rez
-        mx,my = self.mzone
-        if self.cross_mode:
-            duos = [((cx+zx,0),(cx-zx,ry),(0,0,0)),((0,zy+cy),(rx,cy-zy),(0,0,0)),#zona morta
-                    ((int(mx),int(0)),(int(rx-mx),int(ry)),(255,255,255)),((int(0),int(my)),(int(rx),int(ry-my)),(255,255,255))]#zona maxima
+        if self.cross_mode:#usa retangulos para desenhar linhas que começão e terminam fora da imagem
+            duos = [((cx+zx,-10),(cx-zx,ry+4),(0,0,0)),((-10,zy+cy),(rx+10,cy-zy),(0,0,0)),#zona morta
+                    ((mx,-10),(rx-mx,ry+4),(255,255,255)),((-10,my),(rx+10,ry-my),(255,255,255))]#zona maxima
         else: 
-            duos = [((cx+zx,zy+cy),(cx-zx,cy-zy),(0,0,0))#zona morta
-                    ((int(mx),int(my)),(int(rx-mx),int(ry-my)),(255,255,255))]#zona maxima
-        cv.circle(self.frame,(cx,cy),3,color=(255,255,255),thickness=-1)#ponto central da tela
-        cv.circle(self.frame,(cx,cy),2,color=(0,0,0),thickness=-1)
-        for p1,p2,color in duos:
+            duos = [((cx+zx,zy+cy),(cx-zx,cy-zy),(0,0,0)),#zona morta
+                    ((mx,my),(rx-mx,ry-my),(255,255,255))]#zona maxima
+        self.__doublePoint((cx,cy),(255,255,255),(0,0,0))#ponto central da tela
+        for p1,p2,color in duos:#Cria os retangulos
             cv.rectangle(self.frame,pt1=p1,pt2=p2,color=color,thickness=3)
 
-    def __doubleLine(self,p1,p2,color):#desenha duas linhas uma em cima da outra
-        b,g,r = color
-        cv.line(self.frame,p1,p2,color=color,thickness=2)
-        cv.line(self.frame,p1,p2,(255-b,255-g,255-r),thickness=1)
-
-    def drawHandAndBox(self,box,cat,id): 
+    def __drawHandAndBox(self,box,cat,id): 
         (x,y) =(int(self.hand_center[0]),int(self.hand_center[1]))#poisição do centro da mão em inteiros
-        #desenha um retangulo ao redor dos pontos da mão
-        dist = self.handDist
-        cv.drawContours(self.frame,[box],contourIdx=0,color=(255,0,0),thickness=2)
-        cv.circle(self.frame,(x,y),2,color=(0,0,255),thickness=-1)#ponto central do retangulo
-        cv.putText(self.frame,f"{cat}: {dist}".replace("\t","    "),(x,y),cv.FONT_HERSHEY_PLAIN,1,(0,255,255))#Categoria(Lado) e status da mão
-        
         #linha para do centro da imagem para o centro da mão
         (cx,cy) = self.center
-        self.__doubleLine((cx,cy),(x,cy),(255,0,0))
-        self.__doubleLine((x,cy),(x,y),(255,0,0))
-        print(f"{id}\n\tSide:{cat}\n\tDist:{dist}")# print para as informações das mãos
-    
+        self.__doubleLine((cx,cy),(x,cy),(127,127,0),(127,0,255))
+        self.__doubleLine((x,cy),(x,y),(127,127,0),(127,0,255))
+        #desenha um retangulo ao redor dos pontos da mão
+        dist = self.hand_dist
+        cv.drawContours(self.frame,[box],contourIdx=0,color=(255,0,0),thickness=2)
+        self.__doublePoint((x,y),(0,0,255),(0,255,0),size=3)#ponto central do retangulo
+        cv.putText(self.frame,f"{cat}: {dist}".replace("\t","    "),(x,y),cv.FONT_HERSHEY_PLAIN,1,(0,255,255))#Categoria(Lado) e status da mão
         #desenha linhas entre os dedos da mão
         for a,b in self.duos:#usa as duplas de indexes dos pontos para desenhar as linhas
             self.frame = cv.line(self.frame,self.hand_points[a],self.hand_points[b],color=(0,255,0))
         for p in self.hand_points:#desenha cada ponto da mão e numera eles
             self.frame = cv.putText(self.frame,f"{self.hand_points.index(p)}",p,cv.FONT_HERSHEY_PLAIN,1,(255,255,0))
             self.frame = cv.circle(self.frame,p,2,color=(255,0,255),thickness=-1)
+        print(f"{id}\n\tSide:{cat}\n\tDist:{dist}")# print para as informações das mãos
         
     def main(self):
-
-        ret, frame = self.cap.read()
         
         handSwitch = {0:'Left',1:'Right'}#corrige o lado das mãos
         x,y = self.rez
-        print(self.rez)
-        #cv.namedWindow('Webcam', cv.WINDOW_KEEPRATIO)
+        cv.namedWindow('Webcam', cv.WINDOW_KEEPRATIO)
         while True:
             ret, frame = self.cap.read()
             self.frame = cv.flip(frame,1)
             if not ret: continue
             frame_RGB = mp.Image(mp.ImageFormat.SRGB,cv.cvtColor(self.frame,cv.COLOR_BGR2RGB))
-            r = self.detector.detect(frame_RGB)#resultado da detecção
-            size = len(r.hand_landmarks)
+            detected = self.detector.detect(frame_RGB)#resultado da detecção
+            size = len(detected.hand_landmarks)
             self.__drawnZones()#desenha a zona morta
             if size>0:#ignora se nenuma mão for detectada
-                hand = r.hand_landmarks[0]
-                h = r.handedness[0][0]
-                self.hand_points = [(int(l.x*x),int(l.y*y)) for l in hand]
-                r = cv.minAreaRect(np.array([self.hand_points]))# pega os pontos da caixa e centro da mão
-                self.hand_center = r[0]
+                self.hand_points = [(int(l.x*x),int(l.y*y)) for l in detected.hand_landmarks[0]]#pontos da mão
+
+                r = cv.minAreaRect(np.array([self.hand_points]))# pega os pontos da  e centro da mão
+                self.hand_center = r[0]#centro da mão
                 box =  cv.boxPoints(r) #pontos da caixa
-                self.drawHandAndBox(box.astype(np.int64),handSwitch[h.index],"Main Hand Stats:")
+                self.__drawHandAndBox(box.astype(np.int64),handSwitch[detected.handedness[0][0].index],"Main Hand Stats:")
             cv.imshow('Webcam', self.frame)#mostra a imagem capturada com as alterações feitas
             if cv.waitKey(1) & 0xFF == ord('q'): break
 
